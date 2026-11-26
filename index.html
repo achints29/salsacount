@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SalsaCount">
+  <meta name="theme-color" content="#140b0d">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="styles.css">
+  <title>SalsaCount</title>
+</head>
+<body>
+  <main class="app">
+    <header class="top">
+      <div class="bpm"><span id="bpm">—</span><small>BPM</small></div>
+      <div class="seg" role="group" aria-label="Timing">
+        <button id="on1" type="button" aria-pressed="true">On1</button>
+        <button id="on2" type="button" aria-pressed="false">On2</button>
+      </div>
+      <button id="settingsBtn" class="icon" type="button" aria-label="Settings">⚙︎</button>
+    </header>
+
+    <section class="count">
+      <div id="big" class="big">–</div>
+      <ol id="row" class="row" aria-hidden="true">
+        <li>1</li><li>2</li><li>3</li><li class="rest">4</li>
+        <li>5</li><li>6</li><li>7</li><li class="rest">8</li>
+      </ol>
+    </section>
+
+    <section class="controls">
+      <div class="line">
+        <button id="shiftDown" type="button" aria-label="Move count back one">−1</button>
+        <button id="setOne" type="button" class="primary">This is 1</button>
+        <button id="shiftUp" type="button" aria-label="Move count forward one">+1</button>
+      </div>
+      <div class="line">
+        <button id="slower" type="button">BPM −</button>
+        <button id="stop" type="button">Stop</button>
+        <button id="faster" type="button">BPM +</button>
+      </div>
+    </section>
+
+    <button id="tap" class="tap" type="button">
+      <span class="tap-label">TAP</span>
+      <span id="hint" class="tap-hint">Tap along with the beat, starting on 1</span>
+    </button>
+  </main>
+
+  <div id="settings" class="sheet" hidden>
+    <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <h2 id="settingsTitle">Settings</h2>
+      <label class="toggle">
+        <input id="click" type="checkbox">
+        <span>Metronome click <small>(accent on 1, to check it lines up with the song)</small></span>
+      </label>
+      <label class="slider">
+        <span>Visual offset: <b id="offsetVal">0 ms</b></span>
+        <input id="offset" type="range" min="-150" max="150" step="5" value="0">
+        <small>Move right if the numbers feel late, left if they feel early.</small>
+      </label>
+      <p class="note">On iPhone, the click may be silent if the ring/silent switch is on.</p>
+      <button id="closeSettings" type="button" class="primary">Done</button>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

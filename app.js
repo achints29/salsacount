@@ -146,7 +146,7 @@ function click(when, count) {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.frequency.value = count === 1 ? 1760 : 1100;
-  const peak = count === 1 ? 0.9 : isPause(count) ? 0.25 : 0.5;
+  const peak = count === 1 ? 0.9 : 0.5;
   gain.gain.setValueAtTime(0, when);
   gain.gain.linearRampToValueAtTime(peak, when + 0.002);
   gain.gain.exponentialRampToValueAtTime(0.001, when + 0.05);
@@ -161,7 +161,8 @@ function scheduleClicks() {
   const horizon = t + 120;
   let k = Math.ceil(beatPosition(Math.max(t + 5, lastClick + grid.period * 0.5), grid));
   for (let beat = grid.anchor + k * grid.period; beat < horizon; k++, beat = grid.anchor + k * grid.period) {
-    click(Math.max(ctx.currentTime, toCtxTime(beat)), countForIndex(k, grid.offset));
+    const count = countForIndex(k, grid.offset);
+    if (!isPause(count)) click(Math.max(ctx.currentTime, toCtxTime(beat)), count); // silent on 4 and 8
     lastClick = beat;
   }
 }

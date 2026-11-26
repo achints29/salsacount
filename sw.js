@@ -1,6 +1,6 @@
 // Network first, so updates show up on the next load; falls back to the cache offline.
-const CACHE = 'salsacount-v1';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'tempo.js', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
+const CACHE = 'salsacount-v2';
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'tempo.js', 'beat.js', 'capture-worklet.js', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

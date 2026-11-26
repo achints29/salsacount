@@ -70,3 +70,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 small, .note { color: var(--muted); font-size: 13px; }
 .note { margin: 0; }
 .sheet-card > button { border: 0; border-radius: 14px; padding: 14px; font-size: 17px; }
+.line.four { grid-template-columns: 1fr 1.5fr 1fr 1fr; }
+.line button.listen[aria-pressed="true"] { background: #1f6f4a; border-color: #2c9c68; color: #fff; }
+.line button.listen.waiting { animation: breathe 1.2s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: .55; } }

@@ -1,16 +1,18 @@
 import {
-  fitTaps, countForIndex, isPause, isBreak, beatPosition,
+  fitTaps, countForIndex, isPause, isBreak, beatPosition, nearestBeatIndex,
   offsetForOneAt, withBpm, bpmFromPeriod, mod, RESET_GAP_MS, MAX_BPM,
 } from './tempo.js';
+import { OnsetDetector, BeatTracker } from './beat.js';
 
 const $ = (id) => document.getElementById(id);
 const el = {
   bpm: $('bpm'), big: $('big'), row: [...$('row').children], hint: $('hint'), tap: $('tap'),
   on1: $('on1'), on2: $('on2'), setOne: $('setOne'), shiftUp: $('shiftUp'), shiftDown: $('shiftDown'),
-  slower: $('slower'), faster: $('faster'), stop: $('stop'),
+  slower: $('slower'), faster: $('faster'), stop: $('stop'), listen: $('listen'),
   settings: $('settings'), settingsBtn: $('settingsBtn'), closeSettings: $('closeSettings'),
   click: $('click'), offset: $('offset'), offsetVal: $('offsetVal'),
 };
+const IDLE_HINT = 'Press Listen, or tap along starting on 1';
 
 // ---------- settings (saved per browser; storage can fail in private mode) ----------
 const KEY = 'salsacount.settings';
@@ -21,7 +23,7 @@ const save = () => { try { localStorage.setItem(KEY, JSON.stringify(settings)); 
 // ---------- state ----------
 let grid = null;   // { period, anchor, offset } in performance.now() milliseconds
 let taps = [];     // tap times in the current series
-let shown = null;  // last rendered "k:count" so the DOM is only touched on change
+let shown = null;  // last rendered key so the DOM is only touched on change
 let firstTapAt = null;
 
 const now = () => performance.now();
@@ -31,32 +33,63 @@ const eventTime = (e) => {
   return e && e.timeStamp > 0 && Math.abs(n - e.timeStamp) < 500 ? e.timeStamp : n;
 };
 
+// ---------- audio context (shared by the click and the mic) ----------
+let ctx = null;
+function getCtx() {
+  if (!ctx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    ctx = new AC();
+  }
+  if (ctx.state === 'suspended') ctx.resume();
+  return ctx;
+}
+function setAudioSession(type) {
+  try { if (navigator.audioSession) navigator.audioSession.type = type; } catch {}
+}
+// Audio-clock seconds <-> performance.now() milliseconds.
+function clockMap() {
+  const ts = ctx.getOutputTimestamp ? ctx.getOutputTimestamp() : null;
+  if (ts && ts.performanceTime > 0) return { ctx: ts.contextTime, perf: ts.performanceTime };
+  return { ctx: ctx.currentTime, perf: now() };
+}
+const ctxToPerf = (sec) => { const m = clockMap(); return m.perf + (sec - m.ctx) * 1000; };
+const perfToCtx = (ms) => { const m = clockMap(); return m.ctx + (ms - m.perf) / 1000; };
+
 // ---------- tapping ----------
 function tap(e) {
   e.preventDefault();
   const t = eventTime(e);
-  ensureAudio();
+  if (settings.click && !listening) { setAudioSession('playback'); getCtx(); }
   keepAwake();
   el.tap.classList.add('hit');
   setTimeout(() => el.tap.classList.remove('hit'), 90);
 
   const last = taps.at(-1);
-  if (last !== undefined && t - last < 60000 / MAX_BPM * 0.8) return; // accidental double-tap
+  if (last !== undefined && t - last < (60000 / MAX_BPM) * 0.8) return; // accidental double-tap
   const gapLimit = grid ? Math.max(RESET_GAP_MS, grid.period * 2.5) : RESET_GAP_MS;
   if (last === undefined || t - last > gapLimit) taps = []; // new series: this tap is "1"
   taps.push(t);
 
   if (taps.length === 1) {
     firstTapAt = t;
-    grid = null;
-    render1Only();
+    if (!listening) { grid = null; render1Only(); }
     return;
   }
   const fit = fitTaps(taps);
-  if (fit) {
+  if (!fit) return;
+  if (listening && detected) {
+    // While listening, taps don't replace the detected tempo. They say where the beat
+    // (and the 1) is: if the detector sits on the offbeat, flip it by half a beat.
+    const current = detected.anchor + (halfShift ? detected.period / 2 : 0);
+    const d = mod((fit.anchor - current) / detected.period, 1);
+    if (taps.length >= 3 && Math.abs(d - 0.5) < 0.2) halfShift = !halfShift;
+    applyDetected();
+    grid.offset = offsetForOneAt(taps[0], grid);
+  } else {
     grid = { ...fit, offset: 0 };
-    el.hint.textContent = taps.length < 4 ? 'Keep tapping…' : 'Locked in. Tap again any time to correct.';
   }
+  el.hint.textContent = taps.length < 4 ? 'Keep tapping…' : 'Locked in. Tap again any time to correct.';
 }
 
 function render1Only() {
@@ -67,6 +100,92 @@ function render1Only() {
   el.hint.textContent = 'Keep tapping…';
 }
 
+// ---------- listening ----------
+let listening = false;
+let mic = null;          // { stream, source, node, sink }
+let detected = null;     // latest detector grid in perf ms: { period, anchor }
+let halfShift = false;   // user said the detector is on the offbeat
+
+async function startListening() {
+  const c = getCtx();
+  if (!c || !navigator.mediaDevices?.getUserMedia || !c.audioWorklet) {
+    el.hint.textContent = 'This browser can’t listen through the mic. Tap along instead.';
+    return;
+  }
+  setAudioSession('play-and-record');
+  el.listen.classList.add('waiting');
+  el.hint.textContent = 'Allow the microphone…';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+    await c.audioWorklet.addModule('capture-worklet.js');
+    if (c.state === 'suspended') await c.resume();
+    const source = c.createMediaStreamSource(stream);
+    const node = new AudioWorkletNode(c, 'capture');
+    const sink = c.createGain();
+    sink.gain.value = 0; // keep the graph running without playing the mic back
+    source.connect(node).connect(sink).connect(c.destination);
+    const od = new OnsetDetector(c.sampleRate);
+    const bt = new BeatTracker(od.frameRate);
+    node.port.onmessage = ({ data }) => {
+      od.push(data.samples, data.time, (s, t) => {
+        const g = bt.add(s, t);
+        if (g) onDetected(g);
+      });
+    };
+    mic = { stream, source, node, sink };
+    listening = true;
+    detected = null;
+    halfShift = false;
+    el.listen.setAttribute('aria-pressed', 'true');
+    el.listen.textContent = '🎤 Listening';
+    el.hint.textContent = 'Listening… finding the beat';
+    keepAwake();
+  } catch (err) {
+    el.listen.classList.remove('waiting');
+    el.hint.textContent = err && err.name === 'NotAllowedError'
+      ? 'Microphone blocked. Allow it in Settings › Safari › Microphone.'
+      : 'Couldn’t start the microphone.';
+    setAudioSession('auto');
+  }
+}
+
+function stopListening() {
+  if (mic) {
+    mic.stream.getTracks().forEach((t) => t.stop());
+    try { mic.source.disconnect(); mic.node.disconnect(); mic.sink.disconnect(); } catch {}
+    mic.node.port.onmessage = null;
+  }
+  mic = null;
+  listening = false;
+  detected = null;
+  el.listen.setAttribute('aria-pressed', 'false');
+  el.listen.classList.remove('waiting');
+  el.listen.textContent = '🎤 Listen';
+  setAudioSession('auto');
+}
+
+function onDetected(g) {
+  const first = !detected;
+  detected = { period: g.period * 1000, anchor: ctxToPerf(g.beatTime) };
+  applyDetected(false);
+  if (first) {
+    el.listen.classList.remove('waiting');
+    el.hint.textContent = 'Got the beat. Press “This is 1” on the 1.';
+  }
+}
+
+// Move the grid onto the detected beat, keeping the count where it is.
+function applyDetected() {
+  if (!detected) return;
+  const period = detected.period;
+  const anchor = detected.anchor + (halfShift ? period / 2 : 0);
+  if (!grid) { grid = { period, anchor, offset: 0 }; return; }
+  const k = nearestBeatIndex(anchor, grid);
+  grid = { period, anchor: anchor - k * period, offset: grid.offset };
+}
+
 // ---------- controls ----------
 function setOne(e) {
   if (!grid) return;
@@ -74,15 +193,16 @@ function setOne(e) {
 }
 function shift(d) { if (grid) grid.offset = mod(grid.offset + d, 8); }
 function nudge(d) {
-  if (!grid) return;
+  if (!grid || listening) return;
   grid = withBpm(grid, Math.round(bpmFromPeriod(grid.period)) + d, now());
   taps = []; // next tap starts a fresh series
 }
 function stop() {
+  stopListening();
   grid = null; taps = []; shown = null; firstTapAt = null;
   el.big.className = 'big idle'; el.big.textContent = '–'; el.bpm.textContent = '—';
   highlight(0);
-  el.hint.textContent = 'Tap along with the beat, starting on 1';
+  el.hint.textContent = IDLE_HINT;
   releaseWake();
 }
 function setMode(mode) {
@@ -121,26 +241,7 @@ function frame() {
 }
 
 // ---------- metronome click (Web Audio, scheduled slightly ahead) ----------
-let ctx = null;
 let lastClick = -Infinity; // performance time of the last scheduled click
-
-function ensureAudio() {
-  if (!settings.click) return;
-  if (!ctx) {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    ctx = new AC();
-    // iOS 17+: play even when the ring/silent switch is on.
-    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
-  }
-  if (ctx.state === 'suspended') ctx.resume();
-}
-
-function toCtxTime(perfMs) {
-  const ts = ctx.getOutputTimestamp ? ctx.getOutputTimestamp() : null;
-  if (ts && ts.performanceTime > 0) return ts.contextTime + (perfMs - ts.performanceTime) / 1000;
-  return ctx.currentTime + (perfMs - now()) / 1000;
-}
 
 function click(when, count) {
   const osc = ctx.createOscillator();
@@ -156,13 +257,14 @@ function click(when, count) {
 }
 
 function scheduleClicks() {
-  if (!settings.click || !ctx || ctx.state !== 'running' || !grid) return;
+  // Muted while listening: the mic would hear the click and lock onto it.
+  if (!settings.click || listening || !ctx || ctx.state !== 'running' || !grid) return;
   const t = now();
   const horizon = t + 120;
   let k = Math.ceil(beatPosition(Math.max(t + 5, lastClick + grid.period * 0.5), grid));
   for (let beat = grid.anchor + k * grid.period; beat < horizon; k++, beat = grid.anchor + k * grid.period) {
     const count = countForIndex(k, grid.offset);
-    if (!isPause(count)) click(Math.max(ctx.currentTime, toCtxTime(beat)), count); // silent on 4 and 8
+    if (!isPause(count)) click(Math.max(ctx.currentTime, perfToCtx(beat)), count); // silent on 4 and 8
     lastClick = beat;
   }
 }
@@ -174,7 +276,7 @@ async function keepAwake() {
   try { if (!wake && 'wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); wake?.addEventListener('release', () => { wake = null; }); } catch {}
 }
 function releaseWake() { try { wake?.release(); } catch {} wake = null; }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && grid) keepAwake(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && (grid || listening)) keepAwake(); });
 
 // ---------- wiring ----------
 el.tap.addEventListener('pointerdown', tap);
@@ -184,12 +286,16 @@ el.shiftDown.addEventListener('click', () => shift(-1));
 el.faster.addEventListener('click', () => nudge(1));
 el.slower.addEventListener('click', () => nudge(-1));
 el.stop.addEventListener('click', stop);
+el.listen.addEventListener('click', () => (listening ? stopListening() : startListening()));
 el.on1.addEventListener('click', () => setMode('on1'));
 el.on2.addEventListener('click', () => setMode('on2'));
 el.settingsBtn.addEventListener('click', () => { el.settings.hidden = false; });
 el.closeSettings.addEventListener('click', () => { el.settings.hidden = true; });
 el.settings.addEventListener('click', (e) => { if (e.target === el.settings) el.settings.hidden = true; });
-el.click.addEventListener('change', () => { settings.click = el.click.checked; save(); ensureAudio(); });
+el.click.addEventListener('change', () => {
+  settings.click = el.click.checked; save();
+  if (settings.click && !listening) { setAudioSession('playback'); getCtx(); }
+});
 el.offset.addEventListener('input', () => {
   settings.offsetMs = Number(el.offset.value); save();
   el.offsetVal.textContent = `${settings.offsetMs} ms`;

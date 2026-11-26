@@ -39,8 +39,9 @@
         <button id="setOne" type="button" class="primary">This is 1</button>
         <button id="shiftUp" type="button" aria-label="Move count forward one">+1</button>
       </div>
-      <div class="line">
+      <div class="line four">
         <button id="slower" type="button">BPM −</button>
+        <button id="listen" type="button" class="listen" aria-pressed="false">🎤 Listen</button>
         <button id="stop" type="button">Stop</button>
         <button id="faster" type="button">BPM +</button>
       </div>
@@ -48,7 +49,7 @@
 
     <button id="tap" class="tap" type="button">
       <span class="tap-label">TAP</span>
-      <span id="hint" class="tap-hint">Tap along with the beat, starting on 1</span>
+      <span id="hint" class="tap-hint">Press Listen, or tap along starting on 1</span>
     </button>
   </main>
 
@@ -64,7 +65,7 @@
         <input id="offset" type="range" min="-150" max="150" step="5" value="0">
         <small>Move right if the numbers feel late, left if they feel early.</small>
       </label>
-      <p class="note">On iPhone, the click may be silent if the ring/silent switch is on.</p>
+      <p class="note">On iPhone, the click may be silent if the ring/silent switch is on. The click is muted while listening, so the mic does not hear it.</p>
       <button id="closeSettings" type="button" class="primary">Done</button>
     </div>
   </div>

@@ -243,17 +243,21 @@ function frame() {
 // ---------- metronome click (Web Audio, scheduled slightly ahead) ----------
 let lastClick = -Infinity; // performance time of the last scheduled click
 
+// A short woodblock-style tick on every beat: high and loud on 1, a bit lighter on 5,
+// the same normal tick on every other count, so you always hear where the 8-count starts.
 function click(when, count) {
+  const accent = count === 1 ? 2 : count === 5 ? 1 : 0;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
-  osc.frequency.value = count === 1 ? 1760 : 1100;
-  const peak = count === 1 ? 0.9 : 0.5;
+  osc.type = 'triangle';
+  osc.frequency.value = [1000, 1250, 1600][accent];
+  const peak = [0.45, 0.6, 0.9][accent];
   gain.gain.setValueAtTime(0, when);
   gain.gain.linearRampToValueAtTime(peak, when + 0.002);
-  gain.gain.exponentialRampToValueAtTime(0.001, when + 0.05);
+  gain.gain.exponentialRampToValueAtTime(0.001, when + 0.045);
   osc.connect(gain).connect(ctx.destination);
   osc.start(when);
-  osc.stop(when + 0.06);
+  osc.stop(when + 0.05);
 }
 
 function scheduleClicks() {
@@ -263,8 +267,7 @@ function scheduleClicks() {
   const horizon = t + 120;
   let k = Math.ceil(beatPosition(Math.max(t + 5, lastClick + grid.period * 0.5), grid));
   for (let beat = grid.anchor + k * grid.period; beat < horizon; k++, beat = grid.anchor + k * grid.period) {
-    const count = countForIndex(k, grid.offset);
-    if (!isPause(count)) click(Math.max(ctx.currentTime, perfToCtx(beat)), count); // silent on 4 and 8
+    click(Math.max(ctx.currentTime, perfToCtx(beat)), countForIndex(k, grid.offset));
     lastClick = beat;
   }
 }

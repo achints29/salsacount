@@ -15,7 +15,7 @@ Find the **1-2-3, 5-6-7** in a salsa song, on your phone.
 
 4 and 8 are shown dimmed (the pauses). The break steps are highlighted: 1 and 5 for **On1**, 2 and 6 for **On2**.
 
-Settings (⚙︎): an optional metronome click (accent on 1, silent on 4 and 8; muted while listening) to check the count against the music, and a visual offset if the numbers feel early or late.
+Settings (⚙︎): an optional metronome click (every beat, accent on 1 and 5; muted while listening) to check the count against the music, and a visual offset if the numbers feel early or late.
 
 ## Roadmap
 
